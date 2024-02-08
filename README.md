@@ -2,7 +2,7 @@
 
 The simple, lightweight Raspberry Pi monitoring tool.
 
-<!-- ![]() -->
+![logo](https://github.com/alvaropp/PiPeek/blob/main/media/logo.png)
 
 
 ### Why PiPeek?
