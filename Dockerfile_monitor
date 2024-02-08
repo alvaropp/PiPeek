@@ -1,0 +1,20 @@
+FROM nginx:alpine
+
+# Copy the necessary files
+COPY monitor/index.html /usr/share/nginx/html/
+COPY monitor/favicon.ico /usr/share/nginx/html/
+COPY monitor/default.conf /etc/nginx/conf.d/
+COPY monitor/build_monitor.sh /etc/monitor/build_monitor.sh
+COPY .env /etc/monitor/.env
+
+# Make the build_monitor.sh script executable
+RUN chmod +x /etc/monitor/build_monitor.sh
+
+# Expose the port Nginx will run on
+EXPOSE 9999
+
+# Set the script as the entrypoint
+ENTRYPOINT ["sh", "/etc/monitor/build_monitor.sh"]
+
+# Command to start Nginx
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@latest"></script>
+
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <title>PiPeek Monitor</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+</head>
+
+<body>
+    <div class="container">
+        <h2 class="text-center my-4">PiPeek Monitor</h2>
+    </div>
+
+    <script>
+        const apiKey = '$MONGO_MONITOR_KEY';
+        const appId = '$MONGO_APP_ID';
+        const databaseName = '$MONGO_DATABASE';
+        const collectionNames = '$MONGO_MONITOR_COLLECTIONS'.split(',');
+        const clusterName = '$MONGO_CLUSTER_NAME';
+        const loginUrl = "https://realm.mongodb.com/api/client/v2.0/app/" + appId + "/auth/providers/api-key/login";
+        const dataQueryUrl = 'https://eu-west-2.aws.data.mongodb-api.com/app/' + appId + '/endpoint/data/v1/action/find';
+
+        async function getAccessToken() {
+            const response = await fetch(loginUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    key: apiKey
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to get access token');
+            }
+
+            const data = await response.json();
+            return data.access_token;
+        }
+
+        async function queryDatabase(accessToken, collectionName) {
+            const now = new Date();
+            const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000);
+
+            const query = {
+                "timestamp": {
+                    "$gte": {
+                        "$date": {
+                            "$numberLong": twentyFourHoursAgo.getTime().toString()
+                        }
+                    }
+                }
+            };
+            const sort = { "timestamp": 1 };
+
+            const limit = 1000;
+            let skip = 0;
+            let allDocuments = [];
+            let moreDataAvailable = true;
+
+            while (moreDataAvailable) {
+                const headers = {
+                    'Accept': 'application/json',
+                    'Authorization': 'Bearer ' + accessToken,
+                    'Content-Type': 'application/json'
+                };
+
+                const response = await fetch(dataQueryUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        dataSource: clusterName,
+                        database: databaseName,
+                        collection: collectionName,
+                        filter: query,
+                        sort: sort,
+                        limit: limit,
+                        skip: skip
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.documents.length > 0) {
+                    allDocuments = allDocuments.concat(data.documents);
+                    skip += limit;
+                } else {
+                    moreDataAvailable = false;
+                }
+            }
+
+            return allDocuments;
+        }
+
+        function createAllCharts(allData) {
+            for (let collectionName of Object.keys(allData)) {
+                const data = allData[collectionName];
+                const timestamps = data.map(entry => new Date(entry.timestamp));
+                const cpuTotals = data.map(entry => entry.cpu_total);
+                const rams = data.map(entry => entry.ram);
+                const temperatures = data.map(entry => entry.temperature);
+                const ioRequests = data.map(entry => entry.io_requests);
+
+                const chartContainer = document.createElement('div');
+                chartContainer.className = 'collection-charts';
+                chartContainer.innerHTML = `
+                    <h3>${collectionName}</h3>
+                    <div class="row">
+                        <div class="col-md-6 col-sm-12 mb-3">
+                            <canvas id="${collectionName}-cpuTotalChart"></canvas>
+                        </div>
+                        <div class="col-md-6 col-sm-12 mb-3">
+                            <canvas id="${collectionName}-ramChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 col-sm-12 mb-3">
+                            <canvas id="${collectionName}-ioRequestsChart"></canvas>
+                        </div>
+                        <div class="col-md-6 col-sm-12 mb-3">
+                            <canvas id="${collectionName}-temperatureChart"></canvas>
+                        </div>
+                    </div>
+                `;
+                document.querySelector('.container').appendChild(chartContainer);
+
+                createChart(`${collectionName}-cpuTotalChart`, 'CPU Total (%)', timestamps, cpuTotals);
+                createChart(`${collectionName}-ramChart`, 'RAM (%)', timestamps, rams);
+                createChart(`${collectionName}-temperatureChart`, 'Temperature (C)', timestamps, temperatures);
+                createChart(`${collectionName}-ioRequestsChart`, 'IO requests', timestamps, ioRequests);
+            }
+        }
+
+        function createChart(canvasId, label, timestamps, dataPoints) {
+            const chartData = {
+                labels: timestamps,
+                datasets: [{
+                    label: label,
+                    data: dataPoints,
+                    borderColor: 'rgba(0, 123, 255, 1)',
+                    backgroundColor: 'rgba(0, 123, 255, 0.5)',
+                }],
+            };
+            const options = {
+                plugins: {
+                    title: {
+                        text: label,
+                        display: true
+                    },
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                minute: 'MMM D, h:mm a'
+                            },
+                            tooltipFormat: 'MMM D, h:mm a'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        min: canvasId.includes('cpuTotalChart') || canvasId.includes('ramChart') ? -10 : undefined,
+                        max: canvasId.includes('cpuTotalChart') || canvasId.includes('ramChart') ? 110 : undefined,
+                    }
+                }
+            };
+            new Chart(document.getElementById(canvasId), {
+                type: 'line',
+                data: chartData,
+                options: options,
+            });
+        }
+
+        async function queryAndDisplayData() {
+            try {
+                const accessToken = await getAccessToken();
+
+                let allData = {};
+                for (let collectionName of collectionNames) {
+                    const data = await queryDatabase(accessToken, collectionName);
+                    allData[collectionName] = data;
+                }
+                createAllCharts(allData);
+            } catch (error) {
+                console.error('Error:' + error.message);
+            }
+        }
+
+        queryAndDisplayData();
+    </script>
+</body>
+
+</html>

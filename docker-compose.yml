@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+
+  pipeek-logger:
+    container_name: pipeek-logger
+    image: pipeek-logger
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile_logger
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/health_check.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  pipeek-monitor:
+    container_name: pipeek-monitor
+    image: pipeek-monitor
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile_monitor
+    env_file:
+      - .env
+    ports:
+      - "9999:9999"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/"]
+      interval: 60s
+      timeout: 3s
+      retries: 3

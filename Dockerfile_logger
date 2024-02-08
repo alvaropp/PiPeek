@@ -1,0 +1,37 @@
+#############
+# Build stage
+#############
+FROM golang:alpine AS builder
+
+WORKDIR /app
+
+RUN go mod init logger && go get go.mongodb.org/mongo-driver/mongo
+
+COPY logger/ .
+
+RUN go build -o logger logger.go
+
+#############
+# Final stage
+#############
+FROM alpine:latest
+
+RUN apk --no-cache add sysstat
+
+# health check script
+RUN echo $'#!/bin/sh\n\
+if [ -s /tmp/health_status ]; then\n\
+  status=$(cat /tmp/health_status)\n\
+  if [ "$status" = "OK" ]; then\n\
+    exit 0\n\
+  else\n\
+    exit 1\n\
+  fi\n\
+else\n\
+  exit 1\n\
+fi' > /usr/local/bin/health_check.sh && chmod +x /usr/local/bin/health_check.sh
+
+
+COPY --from=builder /app/logger .
+
+ENTRYPOINT ["./logger"]
